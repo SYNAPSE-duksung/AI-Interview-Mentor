@@ -1,22 +1,27 @@
 """
-[B파트] 답변 평가 모듈
+[평가 모듈] Streamlit 앱용
 
-- evaluate_rules: LLM 없이 규칙 기반으로 분량/키워드/두괄식 1차 채점
-- EXAONE 4.0 모델 로드 (import 시점에 1회 로드됨)
-- evaluate_logical_structure: EXAONE으로 논리구조 평가 + 개선답변 + 꼬리질문 생성
-- evaluate_answer: [최종 API] 위 둘을 합쳐 점수/피드백/개선답변/꼬리질문 리포트 반환
+원본(루트의 evaluator.py, Colab/로컬 스크립트용)에서 아래 2가지를 수정함.
 
-원본 노트북 cell 13에 오타(문법 에러: `evaluation_result = {}` 다음 줄에
-불필요한 `t` 한 글자)가 있어 SyntaxError가 나던 부분을 수정했습니다.
+1. EXAONE 모델 로딩을 함수로 감싸고 @st.cache_resource를 추가.
+   -> Streamlit은 사용자가 버튼 하나 누를 때마다 main.py 전체를 다시 실행(rerun)하는데,
+      원본처럼 모듈 최상단에서 모델을 로드하면 세션마다 반복 로드될 위험 존재.
+      st.cache_resource를 쓰면 앱이 켜져 있는 동안 딱 한 번만 로드되고 재사용.
+      (audio/stt.py의 whisper 모델 로딩과 동일한 패턴입니다)
+
+2. Gemini API 키는 필요 X
+   -> evaluate_answer()는 규칙기반 채점(순수 파이썬)과 EXAONE(로컬 모델)만 사용하고,
+      Gemini API를 호출하지 않음. 그래서 이 파일에는 api_key 파라미터가 존재 X.
 """
 import json
 import re
 
+import streamlit as st
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# ===== Rule-based 평가 함수 =====
 
+# ===== Rule-based 평가 함수 =====
 
 def evaluate_rules(answer: str, required_keywords: list) -> dict:
     """
@@ -42,7 +47,10 @@ def evaluate_rules(answer: str, required_keywords: list) -> dict:
     found_keywords = [kw for kw in required_keywords if kw in answer]
     missing_keywords = [kw for kw in required_keywords if kw not in answer]
 
-    if not missing_keywords:
+    if not required_keywords:
+        keyword_status = "➖ 해당없음"
+        keyword_desc = "이 질문에는 별도로 지정된 핵심 키워드가 없습니다."
+    elif not missing_keywords:
         keyword_status = "✅ 만족"
         keyword_desc = f"직무 핵심 키워드({', '.join(found_keywords)})가 문장에 아주 잘 녹아있습니다."
     else:
@@ -73,27 +81,28 @@ def evaluate_rules(answer: str, required_keywords: list) -> dict:
     return evaluation_result
 
 
-# ===== EXAONE 4.0 모델 로드 =====
+# ===== EXAONE 4.0 모델 로드 (Streamlit 캐싱) =====
 
-model_id = "LGAI-EXAONE/EXAONE-4.0-1.2B"
-
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    torch_dtype=torch.float16,
-    device_map="auto"
-)
-
-print("✅ EXAONE 4.0 모델이 GPU 메모리에 성공적으로 로드되었습니다!")
+@st.cache_resource(show_spinner="평가 모델(EXAONE)을 불러오는 중입니다... (최초 1회, 다소 시간이 걸려요)")
+def load_exaone_model():
+    model_id = "LGAI-EXAONE/EXAONE-4.0-1.2B"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16,
+        device_map="auto"
+    )
+    return tokenizer, model
 
 
 # ===== EXAONE 기반 논리구조 평가 + 개선답변 + 꼬리질문 생성 =====
-
 
 def evaluate_logical_structure(question: str, answer: str) -> dict:
     """
     EXAONE 4.0 모델을 이용해 답변의 논리구조를 평가하고, 개선 답변과 꼬리질문을 생성하는 함수.
     """
+    tokenizer, model = load_exaone_model()
+
     system_prompt = (
         "너는 대기업 전문 채용 면접관이자 AI 취업 코치이다.\n"
         "제시된 [면접 질문]과 [사용자 답변]을 분석하여 아래 3가지 항목을 수행하라.\n\n"
@@ -151,21 +160,16 @@ def evaluate_logical_structure(question: str, answer: str) -> dict:
     return result_dict
 
 
-# ===== B파트 최종 통합 함수 =====
-
+# ===== 최종 통합 함수 =====
 
 def evaluate_answer(question: str, answer: str, required_keywords: list = None) -> dict:
     """
-    [B파트 최종 API 인터페이스 함수]
-    인풋: 면접 질문(str), Whisper STT 변환 텍스트(str), 필수 키워드 리스트
-    아웃풋: 백엔드/프론트엔드 연동용 표준 리포트 딕셔너리(dict)
-
-    ⚠️ 주의: 아래 줄이 파라미터로 받은 required_keywords를 무시하고 덮어씁니다.
-    A파트에서 넘겨준 값을 실제로 쓰려면 이 줄을 삭제해야 합니다.
+    [최종 API 인터페이스 함수]
+    인풋: 면접 질문(str), STT 변환 텍스트(str), 필수 키워드 리스트(선택)
+    아웃풋: Streamlit 화면에 바로 뿌릴 수 있는 표준 리포트 딕셔너리(dict)
     """
-    # 함수 파라미터로 받은 required_keywords를 그대로 사용
     if required_keywords is None:
-        required_keywords = []  # 혹시 안 넘어올 경우를 대비한 기본값
+        required_keywords = []
 
     rules = evaluate_rules(answer, required_keywords)
     llm_result = evaluate_logical_structure(question, answer)
