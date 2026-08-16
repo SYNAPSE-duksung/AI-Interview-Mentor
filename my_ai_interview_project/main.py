@@ -2,7 +2,7 @@ import streamlit as st
 import os
 from models.gemini_interviewer import generate_questions
 from audio.stt import transcribe_audio
-from evaluation.evaluator import evaluate_answer
+from evaluation.evaluator import evaluate_answer # 2팀 평가 모듈 연동 완료
 
 # 페이지 기본 설정
 st.set_page_config(page_title="AI 면접 시스템", page_icon="👔", layout="wide")
@@ -34,13 +34,17 @@ if st.session_state.step == "입력화면":
             st.error("왼쪽 사이드바에 API 키를 입력해주세요.")
         elif company_input and job_input:
             with st.spinner("1턴 질문(인성/조직적응력)을 생성하고 있습니다..."):
-                st.session_state.current_question = generate_questions(company_input, job_input, "personality", api_key)
-                st.session_state.company = company_input
-                st.session_state.job = job_input
-                st.session_state.turn = 1
-                st.session_state.history = []
-                st.session_state.step = "면접화면"
-                st.rerun()
+                try:
+                    # 🛡️ 에러 처리: 질문 생성(Gemini API) 타임아웃/오류 방지
+                    st.session_state.current_question = generate_questions(company_input, job_input, "personality", api_key)
+                    st.session_state.company = company_input
+                    st.session_state.job = job_input
+                    st.session_state.turn = 1
+                    st.session_state.history = []
+                    st.session_state.step = "면접화면"
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"⚠️ 질문 생성에 실패했습니다. API 키가 올바른지 확인하거나 잠시 후 다시 시도해 주세요. (상세 오류: {e})")
         else:
             st.warning("정보를 모두 입력하세요.")
 
@@ -58,43 +62,60 @@ elif st.session_state.step == "면접화면":
 
     if audio_value is not None:
         with st.spinner("STT 변환 중..."):
-            with open("temp_answer.wav", "wb") as f:
-                f.write(audio_value.getbuffer())
-            stt_text = transcribe_audio("temp_answer.wav")
+            try:
+                # 🛡️ 에러 처리: 오디오 파일 저장 및 변환 과정 오류 방지
+                with open("temp_answer.wav", "wb") as f:
+                    f.write(audio_value.getbuffer())
+                stt_text = transcribe_audio("temp_answer.wav")
 
-            st.success("답변이 정상적으로 인식되었습니다!")
-            st.write(f"📝 **내 답변:** {stt_text}")
+                # 🛡️ 에러 처리: 아무 말도 안 하거나 인식에 실패했을 때
+                if not stt_text or len(stt_text.strip()) < 2:
+                    st.warning("⚠️ 음성이 제대로 인식되지 않았습니다. 마이크를 확인하고 다시 녹음해 주세요!")
+                else:
+                    st.success("답변이 정상적으로 인식되었습니다!")
+                    st.write(f"📝 **내 답변:** {stt_text}")
 
-            button_label = "다음 질문으로 넘어가기 ➡️" if st.session_state.turn < 3 else "📊 종합 결과 확인하기"
+                    button_label = "다음 질문으로 넘어가기 ➡️" if st.session_state.turn < 3 else "📊 종합 결과 확인하기"
 
-            if st.button(button_label):
-                st.session_state.history.append({
-                    "turn": st.session_state.turn,
-                    "question": st.session_state.current_question,
-                    "answer": stt_text
-                })
+                    if st.button(button_label):
+                        st.session_state.history.append({
+                            "turn": st.session_state.turn,
+                            "question": st.session_state.current_question,
+                            "answer": stt_text
+                        })
 
-                if st.session_state.turn == 1:
-                    with st.spinner("2턴 질문(직무 역량)을 생성하고 있습니다..."):
-                        st.session_state.current_question = generate_questions(st.session_state.company, st.session_state.job, "job", api_key)
-                        st.session_state.turn = 2
-                        st.rerun()
+                        # 라우팅
+                        if st.session_state.turn == 1:
+                            with st.spinner("2턴 질문(직무 역량)을 생성하고 있습니다..."):
+                                try:
+                                    # 🛡️ 에러 처리: 2턴 질문 생성 실패 방지
+                                    st.session_state.current_question = generate_questions(st.session_state.company, st.session_state.job, "job", api_key)
+                                    st.session_state.turn = 2
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"⚠️ 질문 생성에 실패했습니다. 다시 버튼을 눌러주세요. (상세 오류: {e})")
 
-                elif st.session_state.turn == 2:
-                    with st.spinner("답변을 분석하여 꼬리질문을 준비하고 있습니다..."):
-                        eval_result = evaluate_answer(
-                            question=st.session_state.current_question,
-                            answer=stt_text,
-                        )
-                        st.session_state.history[-1]["evaluation"] = eval_result
+                        elif st.session_state.turn == 2:
+                            with st.spinner("답변을 분석하여 꼬리질문을 준비하고 있습니다..."):
+                                try:
+                                    # 🛡️ 에러 처리: 평가 모듈(EXAONE) 실행 중 에러 발생 대비
+                                    eval_result = evaluate_answer(
+                                        question=st.session_state.current_question,
+                                        answer=stt_text,
+                                    )
+                                    st.session_state.history[-1]["evaluation"] = eval_result
+                                    st.session_state.current_question = eval_result["tail_question"]
+                                    st.session_state.turn = 3
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"⚠️ 실패 상세 원인: {e}")
 
-                        st.session_state.current_question = eval_result["tail_question"]
-                        st.session_state.turn = 3
-                        st.rerun()
-
-                elif st.session_state.turn == 3:
-                    st.session_state.step = "결과화면"
-                    st.rerun()
+                        elif st.session_state.turn == 3:
+                            st.session_state.step = "결과화면"
+                            st.rerun()
+                            
+            except Exception as e:
+                st.error("⚠️ 음성 변환(STT) 중 시스템 오류가 발생했습니다. 다시 시도해 주세요.")
 
 
 # --- 4. 결과 화면 (종합 피드백 대시보드) ---
@@ -105,13 +126,24 @@ elif st.session_state.step == "결과화면":
     with st.spinner("최종 리포트를 계산하고 있습니다..."):
         for item in st.session_state.history:
             if "evaluation" not in item:
-                item["evaluation"] = evaluate_answer(item["question"], item["answer"])
+                try:
+                    # 🛡️ 에러 처리: 1턴, 3턴 등 평가가 아직 안 된 항목들 채점 시도
+                    item["evaluation"] = evaluate_answer(item["question"], item["answer"])
+                except Exception as e:
+                    # 에러가 나더라도 결과창이 멈추지 않도록 안전한 기본값(Fallback) 배정
+                    item["evaluation"] = {
+                        "score": 0,
+                        "feedback": {"두괄식": "평가 실패", "논리구조": "서버 오류로 평가를 완료하지 못했습니다.", "키워드": "평가 실패", "분량": "평가 실패"},
+                        "improved_answer": "평가 중 오류가 발생했습니다.",
+                        "tail_question": ""
+                    }
 
-    scores = [item["evaluation"]["score"] for item in st.session_state.history]
+    # 점수 계산 (에러로 0점 처리된 것이 있을 수 있으므로 안전하게 계산)
+    scores = [item["evaluation"]["score"] for item in st.session_state.history if item["evaluation"]["score"] > 0]
     total_score = round(sum(scores) / len(scores)) if scores else 0
 
     st.subheader("🏆 총점")
-    st.metric(label="AI 면접관의 종합 평가 점수 (3턴 평균)", value=f"{total_score}점")
+    st.metric(label="AI 면접관의 종합 평가 점수 (정상 채점 기준 평균)", value=f"{total_score}점")
 
     st.subheader("🔍 턴별 상세 피드백")
     turn_titles = {1: "1턴 (인성)", 2: "2턴 (직무 역량)", 3: "3턴 (꼬리질문)"}

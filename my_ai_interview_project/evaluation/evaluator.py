@@ -86,7 +86,7 @@ def evaluate_rules(answer: str, required_keywords: list) -> dict:
 @st.cache_resource(show_spinner="평가 모델(EXAONE)을 불러오는 중입니다... (최초 1회, 다소 시간이 걸려요)")
 def load_exaone_model():
     model_id = "LGAI-EXAONE/EXAONE-4.0-1.2B"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
