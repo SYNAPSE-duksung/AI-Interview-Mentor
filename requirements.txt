@@ -7,7 +7,3 @@ peft>=0.18.0
 accelerate>=1.0.0
 bitsandbytes>=0.45.0
 torch
-
-# ffmpeg는 pip이 아니라 시스템 패키지입니다.
-# Ubuntu/Colab: apt-get install -y ffmpeg
-# Mac: brew install ffmpeg
