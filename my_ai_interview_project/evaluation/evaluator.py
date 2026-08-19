@@ -90,7 +90,7 @@ def load_exaone_model():
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
-        device_map="auto"
+        device_map="cpu"
     )
     return tokenizer, model
 
