@@ -1,0 +1,4 @@
+﻿,n,parse_fail_rate,headline_acc,length_acc,logic_spearman,logic_kappa,logic_mae,keyword_f1
+fine-tuned,201.0,0.0,0.721,0.886,0.339,0.387,0.493,0.277
+base,201.0,0.02,0.447,0.746,0.191,0.014,1.467,0.018
+gpt-4o-mini,201.0,0.0,0.692,0.811,0.432,0.31,0.597,0.037
