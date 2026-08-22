@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+from gtts import gTTS
 from models.gemini_interviewer import generate_questions
 from audio.stt import transcribe_audio
 from evaluation.evaluator import evaluate_answer # 2팀 평가 모듈 연동 완료
@@ -20,7 +21,7 @@ if 'step' not in st.session_state: st.session_state.step = "입력화면"
 if 'turn' not in st.session_state: st.session_state.turn = 1
 if 'history' not in st.session_state: st.session_state.history = []  # 주고받은 Q&A + 평가 기록 저장
 if 'current_question' not in st.session_state: st.session_state.current_question = ""
-
+if 'last_played_q' not in st.session_state: st.session_state.last_played_q = "" # 이미 읽은 질문 기억하기용
 
 # --- 2. 입력 화면 ---
 if st.session_state.step == "입력화면":
@@ -57,7 +58,16 @@ elif st.session_state.step == "면접화면":
 
     turn_titles = {1: "1턴: 인성 및 조직적응력 질문", 2: "2턴: 직무 역량 질문", 3: "3턴: 심층 꼬리질문"}
     st.subheader(f"[{turn_titles[st.session_state.turn]}]")
-
+    if st.session_state.current_question != st.session_state.last_played_q:
+        try:
+            tts = gTTS(text=st.session_state.current_question, lang='ko')
+            tts.save("question.mp3")  # 음성 파일로 임시 저장
+            st.audio("question.mp3", format="audio/mp3", autoplay=True) # 자동 재생!
+            
+            # 한 번 읽은 질문은 기억해둬서 또 안 읽게 막기
+            st.session_state.last_played_q = st.session_state.current_question
+        except Exception as e:
+            st.warning("⚠️ 일시적인 오류로 면접관의 음성을 불러오지 못했습니다. 텍스트를 읽어주세요.")
     st.info(f"**면접관:** {st.session_state.current_question}")
 
     audio_value = st.audio_input("답변 녹음하기", key=f"audio_{st.session_state.turn}")
