@@ -3,6 +3,7 @@ import os
 from models.gemini_interviewer import generate_questions
 from audio.stt import transcribe_audio
 from evaluation.evaluator import evaluate_answer # 2팀 평가 모듈 연동 완료
+from models.gemini_interviewer import generate_questions, generate_keywords_for_question
 
 # 페이지 기본 설정
 st.set_page_config(page_title="AI 면접 시스템", page_icon="👔", layout="wide")
@@ -37,6 +38,7 @@ if st.session_state.step == "입력화면":
                 try:
                     # 🛡️ 에러 처리: 질문 생성(Gemini API) 타임아웃/오류 방지
                     st.session_state.current_question = generate_questions(company_input, job_input, "personality", api_key)
+                    st.session_state.current_keywords = []  # 인성 질문은 키워드 없음
                     st.session_state.company = company_input
                     st.session_state.job = job_input
                     st.session_state.turn = 1
@@ -90,6 +92,7 @@ elif st.session_state.step == "면접화면":
                                 try:
                                     # 🛡️ 에러 처리: 2턴 질문 생성 실패 방지
                                     st.session_state.current_question = generate_questions(st.session_state.company, st.session_state.job, "job", api_key)
+                                    st.session_state.current_keywords = generate_keywords_for_question(st.session_state.job, st.session_state.current_question, api_key)
                                     st.session_state.turn = 2
                                     st.rerun()
                                 except Exception as e:
@@ -102,6 +105,7 @@ elif st.session_state.step == "면접화면":
                                     eval_result = evaluate_answer(
                                         question=st.session_state.current_question,
                                         answer=stt_text,
+                                        required_keywords=st.session_state.get("current_keywords", [])
                                     )
                                     st.session_state.history[-1]["evaluation"] = eval_result
                                     st.session_state.current_question = eval_result["tail_question"]
@@ -128,7 +132,7 @@ elif st.session_state.step == "결과화면":
             if "evaluation" not in item:
                 try:
                     # 🛡️ 에러 처리: 1턴, 3턴 등 평가가 아직 안 된 항목들 채점 시도
-                    item["evaluation"] = evaluate_answer(item["question"], item["answer"])
+                    item["evaluation"] = evaluate_answer(item["question"], item["answer"], required_keywords=[])
                 except Exception as e:
                     # 에러가 나더라도 결과창이 멈추지 않도록 안전한 기본값(Fallback) 배정
                     item["evaluation"] = {
