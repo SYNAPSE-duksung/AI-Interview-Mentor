@@ -1,0 +1,11 @@
+streamlit
+google-genai
+gTTS
+openai-whisper
+transformers>=5.0.0
+peft>=0.18.0
+accelerate>=1.0.0
+bitsandbytes>=0.45.0
+torch
+torchvision
+safetensors
