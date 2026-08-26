@@ -7,9 +7,13 @@ EXAONE을 로컬에서 직접 실행하지 않고,
 import re
 import requests
 import streamlit as st
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # 2팀이 서버 띄울 때마다 바뀌는 ngrok 주소 (매번 최신으로 업데이트 필요)
-EVAL_SERVER_URL = "https://xxxx.ngrok-free.app/evaluate"
+EVAL_SERVER_URL = os.environ.get("EVAL_SERVER_URL")
 
 
 def evaluate_rules(answer: str, required_keywords: list) -> dict:
